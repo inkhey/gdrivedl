@@ -3,11 +3,13 @@ from __future__ import unicode_literals
 import os
 import re
 import sys
+import time
 import unicodedata
 import argparse
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from urllib.error import HTTPError
 
 try:
     # Python3
@@ -31,6 +33,7 @@ FILE_URL = "https://docs.google.com/uc?export=download&id={id}&confirm={confirm}
 FOLDER_URL = "https://drive.google.com/embeddedfolderview?id={id}#list"
 CHUNKSIZE = 64 * 1024
 USER_AGENT = "Mozilla/5.0"
+DEFAULT_WAIT_TIME = 60
 
 ID_PATTERNS = [
     re.compile("/file/d/([0-9A-Za-z_-]{10,})(?:/|$)", re.IGNORECASE),
@@ -142,8 +145,16 @@ class GDriveDL(object):
     def _request(self, url):
         logging.debug("Requesting: {}".format(url))
         req = Request(url, headers={"User-Agent": USER_AGENT})
-
-        f = self._opener.open(req)
+        while True:
+            try:
+                f = self._opener.open(req)
+            except HTTPError as exc:
+                if exc.code == 429:
+                    wait_time = exc.headers.get("Retry-After") or DEFAULT_WAIT_TIME
+                    logging.info("wait {} seconds".format(wait_time))
+                    time.sleep(wait_time)
+                    continue
+            break
         try:
             yield f
         finally:
@@ -266,6 +277,7 @@ class GDriveDL(object):
             if not content_disposition:
                 if confirm:
                     logging.error("content-disposition not found and confirm={} did not work".format(confirm))
+                    breakpoint()
                     sys.exit(1)
 
                 page = resp.read(CHUNKSIZE)
